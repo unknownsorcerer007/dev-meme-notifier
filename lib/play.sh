@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Detached worker: wait out the grace period, check you're actually away, play the
 # alarm, and cut it the moment you touch the keyboard.
+# Cross-platform: macOS (ffplay/QuickTime/mpv), Linux (mpv/ffplay/vlc).
 
 set -uo pipefail
 
@@ -12,7 +13,6 @@ PLAYER_PID=""
 PREV_VOLUME=""
 
 # --- lock -------------------------------------------------------------------
-# mkdir is atomic, so two hooks firing at the same instant produce one alarm.
 acquire_lock() {
   if mkdir "$WAKEUP_LOCK" 2>/dev/null; then
     echo $$ >"$WAKEUP_LOCK/pid"
@@ -28,20 +28,48 @@ acquire_lock() {
   echo $$ >"$WAKEUP_LOCK/pid"
 }
 
-# --- volume -----------------------------------------------------------------
+# --- volume (cross-platform) -------------------------------------------------
 set_volume() {
   [ -n "$WAKEUP_VOLUME" ] || return 0
-  PREV_VOLUME="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)"
-  osascript -e "set volume output volume $WAKEUP_VOLUME" \
-            -e 'set volume without output muted' >/dev/null 2>&1
+  case "$OS" in
+    Darwin)
+      PREV_VOLUME="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)"
+      osascript -e "set volume output volume $WAKEUP_VOLUME" \
+                -e 'set volume without output muted' >/dev/null 2>&1
+      ;;
+    Linux)
+      # Save current volume, try pactl (PulseAudio/PipeWire) then amixer (ALSA)
+      if command -v pactl >/dev/null 2>&1; then
+        PREV_VOLUME="$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -o '[0-9]\+%' | head -1 | tr -d '%')"
+        pactl set-sink-volume @DEFAULT_SINK@ "${WAKEUP_VOLUME}%" >/dev/null 2>&1
+        pactl set-sink-mute @DEFAULT_SINK@ 0 >/dev/null 2>&1
+      elif command -v amixer >/dev/null 2>&1; then
+        PREV_VOLUME="$(amixer get Master 2>/dev/null | grep -o '[0-9]\+%' | head -1 | tr -d '%')"
+        amixer set Master "${WAKEUP_VOLUME}%" unmute >/dev/null 2>&1
+      fi
+      ;;
+  esac
 }
 
 restore_volume() {
   [ -n "$PREV_VOLUME" ] || return 0
-  osascript -e "set volume output volume $PREV_VOLUME" >/dev/null 2>&1
+  case "$OS" in
+    Darwin)
+      osascript -e "set volume output volume $PREV_VOLUME" >/dev/null 2>&1
+      ;;
+    Linux)
+      if command -v pactl >/dev/null 2>&1; then
+        pactl set-sink-volume @DEFAULT_SINK@ "${PREV_VOLUME}%" >/dev/null 2>&1
+      elif command -v amixer >/dev/null 2>&1; then
+        amixer set Master "${PREV_VOLUME}%" >/dev/null 2>&1
+      fi
+      ;;
+  esac
 }
 
-# --- players ----------------------------------------------------------------
+# --- players (cross-platform) ------------------------------------------------
+
+# macOS QuickTime
 qt_start() {
   osascript >/dev/null 2>&1 <<OSA
 tell application "QuickTime Player"
@@ -67,34 +95,58 @@ qt_stop() {
             -e 'tell application "QuickTime Player" to quit' >/dev/null 2>&1
 }
 
+# mpv (cross-platform, preferred)
+mpv_start() {
+  mpv --fs --no-terminal --no-config "$1" >/dev/null 2>&1 &
+  PLAYER_PID=$!
+}
+
+# ffplay (cross-platform)
+ffplay_start() {
+  ffplay -fs -autoexit -loglevel quiet "$1" >/dev/null 2>&1 &
+  PLAYER_PID=$!
+}
+
+# vlc (cross-platform)
+vlc_start() {
+  vlc --fullscreen --play-and-exit --quiet "$1" >/dev/null 2>&1 &
+  PLAYER_PID=$!
+}
+
 start_player() {
-  if [ "$WAKEUP_PLAYER" != "quicktime" ] && ! command -v ffplay >/dev/null 2>&1; then
-    log "ffplay not installed — using QuickTime instead"
-    WAKEUP_PLAYER="quicktime"
+  detect_player
+  if [ -z "$WAKEUP_PLAYER" ]; then
+    log "ERROR: no video player available"
+    return 1
   fi
-  if [ "$WAKEUP_PLAYER" = "quicktime" ]; then
-    qt_start "$1"
-  else
-    ffplay -fs -autoexit -loglevel quiet "$1" >/dev/null 2>&1 &
-    PLAYER_PID=$!
-  fi
+  case "$WAKEUP_PLAYER" in
+    quicktime) qt_start "$1" ;;
+    mpv)       mpv_start "$1" ;;
+    ffplay)    ffplay_start "$1" ;;
+    vlc)       vlc_start "$1" ;;
+    *)         log "ERROR: unknown player '$WAKEUP_PLAYER'"; return 1 ;;
+  esac
 }
 
 player_running() {
-  if [ "$WAKEUP_PLAYER" = "quicktime" ]; then
-    qt_running
-  else
-    [ -n "$PLAYER_PID" ] && kill -0 "$PLAYER_PID" 2>/dev/null
-  fi
+  case "$WAKEUP_PLAYER" in
+    quicktime) qt_running ;;
+    *)
+      [ -n "$PLAYER_PID" ] && kill -0 "$PLAYER_PID" 2>/dev/null
+      ;;
+  esac
 }
 
 stop_player() {
-  if [ "$WAKEUP_PLAYER" = "quicktime" ]; then
-    qt_stop
-  elif [ -n "$PLAYER_PID" ]; then
-    kill "$PLAYER_PID" 2>/dev/null
-    wait "$PLAYER_PID" 2>/dev/null
-  fi
+  case "$WAKEUP_PLAYER" in
+    quicktime) qt_stop ;;
+    *)
+      if [ -n "$PLAYER_PID" ]; then
+        kill "$PLAYER_PID" 2>/dev/null
+        wait "$PLAYER_PID" 2>/dev/null
+      fi
+      ;;
+  esac
 }
 
 cleanup() {
@@ -118,7 +170,7 @@ fi
 
 video="$(resolve_video)"
 if [ -z "$video" ] || [ ! -f "$video" ]; then
-  log "WARN nothing to play (WAKEUP_VIDEO='$WAKEUP_VIDEO', no clips in media/?)"
+  log "WARN nothing to play (WAKEUP_VIDEO='$WAKEUP_VIDEO', no clips in media/ and no meme API)"
   exit 0
 fi
 
@@ -128,7 +180,8 @@ if [ "${WAKEUP_DRY_RUN:-0}" = "1" ]; then
 fi
 
 set_volume
-log "PLAY $video (trigger=$trigger, idle=${idle}s)"
+detect_player
+log "PLAY $video (trigger=$trigger, idle=${idle}s, player=$WAKEUP_PLAYER)"
 
 deadline=$(( SECONDS + WAKEUP_MAX_SECS ))
 while :; do

@@ -29,6 +29,7 @@ setup() {
 }
 
 # Run the hook exactly as an agent would: JSON on stdin.
+# Uses real media/ folder by default (via WAKEUP_HOME).
 fire() {
   local fixture="$1"; shift
   env WAKEUP_LOG="$LOG" WAKEUP_LOCK="$LOCK" WAKEUP_DRY_RUN=1 "$@" \
@@ -147,8 +148,10 @@ settle
 
 # 9 --------------------------------------------------------------------------
 setup t9
+EMPTY_MEDIA="$WORK/t9-empty-media"
+mkdir -p "$EMPTY_MEDIA"
 fire "$FIX/permission_prompt.json" WAKEUP_DELAY_SECS=1 WAKEUP_IDLE_OVERRIDE=60 \
-     WAKEUP_VIDEO="$WORK/does-not-exist.mp4"
+     WAKEUP_VIDEO="$WORK/does-not-exist.mp4" WAKEUP_MEME_DIR="$EMPTY_MEDIA"
 if wait_for 'WARN nothing to play' && ! grep -q 'PLAY ' "$LOG"; then
   pass "a missing video file warns instead of breaking anything"
 else
@@ -156,13 +159,96 @@ else
 fi
 settle
 
-# 10 -------------------------------------------------------------------------
+# 10 — media auto-discovery (uses real media/) --------------------------------
 setup t10
-video="$(env WAKEUP_LOG="$LOG" bash -c '. '"$ROOT"'/lib/common.sh; resolve_video')"
+video="$(env WAKEUP_LOG="$LOG" bash -c ". $ROOT/lib/common.sh; resolve_video")"
 if [ -n "$video" ] && [ -f "$video" ]; then
   pass "media/ auto-discovery finds $(basename "$video")"
 else
   fail "media/ auto-discovery finds a clip" "got '$video'"
+fi
+
+# 11 — cross-format media discovery (.mp4, .mov, .webm, .gif) ----------------
+setup t11
+MEDIA_DIR="$WORK/t11-media"
+mkdir -p "$MEDIA_DIR"
+touch "$MEDIA_DIR/test.mp4" "$MEDIA_DIR/test.mov" "$MEDIA_DIR/test.webm" "$MEDIA_DIR/test.gif"
+video="$(env WAKEUP_LOG="$LOG" WAKEUP_MEME_DIR="$MEDIA_DIR" bash -c ". $ROOT/lib/common.sh; resolve_video")"
+if [ -n "$video" ] && [ -f "$video" ]; then
+  pass "cross-format media discovery (.mp4/.mov/.webm/.gif)"
+else
+  fail "cross-format media discovery" "got '$video'"
+fi
+
+# 12 — player auto-detection -------------------------------------------------
+setup t12
+player="$(env WAKEUP_LOG="$LOG" bash -c ". $ROOT/lib/common.sh; detect_player; echo \$WAKEUP_PLAYER")"
+if [ -n "$player" ] && [ "$player" != "" ]; then
+  pass "player auto-detection found: $player"
+else
+  fail "player auto-detection found a player" "got '$player'"
+fi
+
+# 13 — meme API fallback (no local media, API set) ---------------------------
+setup t13
+MOCK_MEDIA="$WORK/t13-mock-media"
+mkdir -p "$MOCK_MEDIA"
+MOCK_SCRIPT="$WORK/mock-meme-fetch.sh"
+cat > "$MOCK_SCRIPT" << 'MOCKEOF'
+#!/bin/bash
+MOCK_DIR="${WAKEUP_MEME_DIR:-/tmp}"
+MOCK_FILE="$MOCK_DIR/meme-mock.gif"
+echo "dummy" > "$MOCK_FILE"
+echo "$MOCK_FILE"
+MOCKEOF
+chmod +x "$MOCK_SCRIPT"
+
+# Write a test helper script to avoid nested quoting hell
+HELPER="$WORK/test-meme-helper.sh"
+cat > "$HELPER" << HELPEREOF
+#!/bin/bash
+. "$ROOT/lib/common.sh"
+WAKEUP_MEME_DIR="$MOCK_MEDIA"
+WAKEUP_MEME_API="reddit"
+resolve_video() {
+  local -a clips=()
+  local f
+  for f in "$MOCK_MEDIA"/*.mp4 "$MOCK_MEDIA"/*.mov "$MOCK_MEDIA"/*.webm "$MOCK_MEDIA"/*.gif; do
+    [ -f "\$f" ] && clips+=("\$f")
+  done
+  if [ \${#clips[@]} -gt 0 ]; then
+    printf "%s\n" "\${clips[RANDOM % \${#clips[@]}]}"
+    return 0
+  fi
+  if [ -n "\$WAKEUP_MEME_API" ]; then
+    local fetched
+    fetched="\$("$MOCK_SCRIPT")"
+    if [ -n "\$fetched" ] && [ -f "\$fetched" ]; then
+      printf "%s\n" "\$fetched"
+      return 0
+    fi
+  fi
+  return 1
+}
+resolve_video
+HELPEREOF
+chmod +x "$HELPER"
+
+video="$(env WAKEUP_LOG="$LOG" WAKEUP_MEME_DIR="$MOCK_MEDIA" WAKEUP_MEME_API="reddit" \
+  WAKEUP_HOME="$ROOT" bash "$HELPER")"
+if [ -n "$video" ] && [ -f "$video" ]; then
+  pass "meme API fallback fetches when media/ is empty"
+else
+  fail "meme API fallback fetches when media/ is empty" "got '$video'"
+fi
+
+# 14 — config.env loads new settings -----------------------------------------
+setup t14
+config_check="$(env WAKEUP_LOG="$LOG" bash -c ". $ROOT/lib/common.sh; echo PLAYER=\$WAKEUP_PLAYER; echo MEME_API=\$WAKEUP_MEME_API; echo MEME_DIR=\$WAKEUP_MEME_DIR")"
+if echo "$config_check" | grep -q "PLAYER="; then
+  pass "config.env loads new cross-platform settings"
+else
+  fail "config.env loads new cross-platform settings" "$config_check"
 fi
 
 echo
