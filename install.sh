@@ -1,61 +1,95 @@
 #!/usr/bin/env bash
-# Install the wake-up hooks into ~/.claude/settings.json.
+# Universal installer for all coding agents.
 #
-#   ./install.sh              # global: every Claude Code session, every project
-#   ./install.sh --project    # just this repo (.claude/settings.json here)
+#   ./install.sh              # global: all detected agents
+#   ./install.sh --project    # this repo only
+#   ./install.sh --agent claude   # specific agent only
 #
-# Safe to run repeatedly: it strips any previous claude-code-wakeup entries first,
-# and backs up your settings before touching them.
+# Auto-installs dependencies (jq, ffmpeg, xprintidle).
+# Safe to run repeatedly: strips previous entries first, backs up settings.
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HOOK="$ROOT/wakeup.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOOK="$SCRIPT_DIR/wakeup.sh"
 
-if ! command -v jq >/dev/null 2>&1; then
-  echo "error: jq is required (brew install jq)" >&2
-  exit 1
-fi
+# Parse args
+SCOPE="global"
+TARGET_AGENTS=()
 
-if [ "${1:-}" = "--project" ]; then
-  SETTINGS="$ROOT/.claude/settings.json"
-  SCOPE="this project only"
-else
-  SETTINGS="$HOME/.claude/settings.json"
-  SCOPE="every Claude Code session"
-fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --project)  SCOPE="project"; shift ;;
+    --agent)    TARGET_AGENTS+=("$2"); shift 2 ;;
+    --help|-h)
+      echo "Usage: $0 [--project] [--agent NAME ...]"
+      echo
+      echo "  --project     Install hooks for this project only"
+      echo "  --agent NAME  Install for a specific agent (claude, codex, hermes, goose, aider)"
+      echo "                Can be repeated. Without --agent, installs for all detected agents."
+      exit 0
+      ;;
+    *) echo "unknown option: $1" >&2; exit 1 ;;
+  esac
+done
 
-mkdir -p "$(dirname "$SETTINGS")"
-[ -f "$SETTINGS" ] || echo '{}' >"$SETTINGS"
+# Source shared modules
+. "$SCRIPT_DIR/lib/common.sh"
+. "$SCRIPT_DIR/lib/deps.sh"
 
-if ! jq empty "$SETTINGS" 2>/dev/null; then
-  echo "error: $SETTINGS is not valid JSON — fix it before installing" >&2
-  exit 1
-fi
-
-BACKUP="$SETTINGS.bak.$(date +%s)"
-cp "$SETTINGS" "$BACKUP"
-
-TMP="$(mktemp)"
-jq --arg cmd "$HOOK" '
-  def strip:
-    map(.hooks |= map(select((.command // "") | test("wakeup\\.sh") | not)))
-    | map(select((.hooks | length) > 0));
-
-  def entry: { matcher: "*", hooks: [ { type: "command", command: $cmd, timeout: 5 } ] };
-
-  .hooks //= {}
-  | .hooks.Notification = ((.hooks.Notification // []) | strip) + [entry]
-  | .hooks.Stop         = ((.hooks.Stop         // []) | strip) + [entry]
-' "$SETTINGS" >"$TMP"
-
-jq empty "$TMP" 2>/dev/null || { echo "error: refusing to write invalid JSON" >&2; rm -f "$TMP"; exit 1; }
-mv "$TMP" "$SETTINGS"
-
-echo "installed → $SETTINGS  (active for: $SCOPE)"
-echo "backup    → $BACKUP"
 echo
-jq '.hooks' "$SETTINGS"
+echo "╔══════════════════════════════════════════════╗"
+echo "║    claude-code-wakeup-alarm — installer      ║"
+echo "╚══════════════════════════════════════════════╝"
 echo
-echo "Hooks load when a session starts, so restart Claude Code to arm it."
-echo "Log: ${WAKEUP_LOG:-$HOME/.claude/wakeup.log}"
+print_env_summary
+echo
+
+# --- Install dependencies ---
+install_deps
+
+# --- Detect agents ---
+if [ ${#TARGET_AGENTS[@]} -eq 0 ]; then
+  echo "detecting installed agents..."
+  while IFS= read -r agent; do
+    [ -n "$agent" ] && TARGET_AGENTS+=("$agent")
+  done < <(detect_agents)
+fi
+
+if [ ${#TARGET_AGENTS[@]} -eq 0 ]; then
+  echo "  ⚠ no supported agents detected"
+  echo "  install a supported agent (claude, codex, hermes, goose, aider) and re-run"
+  echo
+  echo "  you can also specify manually: $0 --agent claude"
+  exit 0
+fi
+
+echo
+echo "configuring agents..."
+echo
+
+export WAKEUP_SCOPE="$SCOPE"
+
+HOOKS_INSTALLED=0
+for agent in "${TARGET_AGENTS[@]}"; do
+  name="$(agent_display_name "$agent")"
+  echo "  $name ($SCOPE scope):"
+  if agent_install_hook "$agent" "$HOOK"; then
+    HOOKS_INSTALLED=$((HOOKS_INSTALLED + 1))
+  fi
+done
+
+echo
+echo "╔══════════════════════════════════════════════╗"
+echo "║    installation complete!                    ║"
+echo "╚══════════════════════════════════════════════╝"
+echo
+echo "  hooks installed for: $(printf '%s ' "${TARGET_AGENTS[@]}")"
+echo "  scope: $SCOPE"
+echo "  player: $PLAYER_NAME"
+echo "  log: ${WAKEUP_LOG:-$HOME/.claude/wakeup.log}"
+echo
+echo "  drop .mp4/.mov/.avi/.mkv/.webm files into media/ for custom alarms"
+echo
+echo "  restart your agent(s) to activate the hooks"
+echo

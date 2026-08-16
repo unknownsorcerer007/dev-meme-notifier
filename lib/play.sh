@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Detached worker: wait out the grace period, check you're actually away, play the
 # alarm, and cut it the moment you touch the keyboard.
+# Cross-platform: macOS, Linux, Windows (Git Bash/MSYS2/WSL).
 
 set -uo pipefail
 
@@ -8,11 +9,10 @@ set -uo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 trigger="${1:-unknown}"
-PLAYER_PID=""
 PREV_VOLUME=""
 
 # --- lock -------------------------------------------------------------------
-# mkdir is atomic, so two hooks firing at the same instant produce one alarm.
+# mkdir is atomic — two hooks firing at the same instant produce one alarm.
 acquire_lock() {
   if mkdir "$WAKEUP_LOCK" 2>/dev/null; then
     echo $$ >"$WAKEUP_LOCK/pid"
@@ -31,72 +31,53 @@ acquire_lock() {
 # --- volume -----------------------------------------------------------------
 set_volume() {
   [ -n "$WAKEUP_VOLUME" ] || return 0
-  PREV_VOLUME="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)"
-  osascript -e "set volume output volume $WAKEUP_VOLUME" \
-            -e 'set volume without output muted' >/dev/null 2>&1
+  case "$WAKEUP_OS" in
+    macos)
+      PREV_VOLUME="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null)"
+      osascript -e "set volume output volume $WAKEUP_VOLUME" \
+                -e 'set volume without output muted' >/dev/null 2>&1
+      ;;
+    linux)
+      if command -v amixer >/dev/null 2>&1; then
+        PREV_VOLUME="$(amixer get Master 2>/dev/null | grep -oP '\[\d+%\]' | head -1 | tr -d '[]%')"
+        amixer set Master "${WAKEUP_VOLUME}%" unmute >/dev/null 2>&1
+      elif command -v pactl >/dev/null 2>&1; then
+        PREV_VOLUME="$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -oP '\d+%' | head -1 | tr -d '%')"
+        pactl set-sink-volume @DEFAULT_SINK@ "${WAKEUP_VOLUME}%" >/dev/null 2>&1
+        pactl set-sink-mute @DEFAULT_SINK@ 0 >/dev/null 2>&1
+      fi
+      ;;
+    windows)
+      if command -v powershell.exe >/dev/null 2>&1; then
+        PREV_VOLUME="$(powershell.exe -NoProfile -Command '(Get-AudioDevice -PlaybackVolume)' 2>/dev/null | tr -d '[:space:]')"
+        powershell.exe -NoProfile -Command "Set-AudioDevice -PlaybackVolume $WAKEUP_VOLUME" >/dev/null 2>&1
+      fi
+      ;;
+  esac
 }
 
 restore_volume() {
   [ -n "$PREV_VOLUME" ] || return 0
-  osascript -e "set volume output volume $PREV_VOLUME" >/dev/null 2>&1
+  case "$WAKEUP_OS" in
+    macos)
+      osascript -e "set volume output volume $PREV_VOLUME" >/dev/null 2>&1
+      ;;
+    linux)
+      if command -v amixer >/dev/null 2>&1; then
+        amixer set Master "${PREV_VOLUME}%" >/dev/null 2>&1
+      elif command -v pactl >/dev/null 2>&1; then
+        pactl set-sink-volume @DEFAULT_SINK@ "${PREV_VOLUME}%" >/dev/null 2>&1
+      fi
+      ;;
+    windows)
+      if command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -Command "Set-AudioDevice -PlaybackVolume $PREV_VOLUME" >/dev/null 2>&1
+      fi
+      ;;
+  esac
 }
 
-# --- players ----------------------------------------------------------------
-qt_start() {
-  osascript >/dev/null 2>&1 <<OSA
-tell application "QuickTime Player"
-  activate
-  set d to open POSIX file "$1"
-  tell d
-    set looping to false
-    present
-    play
-  end tell
-end tell
-OSA
-}
-
-qt_running() {
-  local r
-  r="$(osascript -e 'tell application "QuickTime Player" to if (count documents) > 0 then return (playing of front document) else return false' 2>/dev/null)"
-  [ "$r" = "true" ]
-}
-
-qt_stop() {
-  osascript -e 'tell application "QuickTime Player" to if (count documents) > 0 then close front document saving no' \
-            -e 'tell application "QuickTime Player" to quit' >/dev/null 2>&1
-}
-
-start_player() {
-  if [ "$WAKEUP_PLAYER" != "quicktime" ] && ! command -v ffplay >/dev/null 2>&1; then
-    log "ffplay not installed — using QuickTime instead"
-    WAKEUP_PLAYER="quicktime"
-  fi
-  if [ "$WAKEUP_PLAYER" = "quicktime" ]; then
-    qt_start "$1"
-  else
-    ffplay -fs -autoexit -loglevel quiet "$1" >/dev/null 2>&1 &
-    PLAYER_PID=$!
-  fi
-}
-
-player_running() {
-  if [ "$WAKEUP_PLAYER" = "quicktime" ]; then
-    qt_running
-  else
-    [ -n "$PLAYER_PID" ] && kill -0 "$PLAYER_PID" 2>/dev/null
-  fi
-}
-
-stop_player() {
-  if [ "$WAKEUP_PLAYER" = "quicktime" ]; then
-    qt_stop
-  elif [ -n "$PLAYER_PID" ]; then
-    kill "$PLAYER_PID" 2>/dev/null
-    wait "$PLAYER_PID" 2>/dev/null
-  fi
-}
-
+# --- cleanup ----------------------------------------------------------------
 cleanup() {
   stop_player
   restore_volume
@@ -107,7 +88,7 @@ cleanup() {
 acquire_lock || { log "skip $trigger (another alarm holds the lock)"; exit 0; }
 trap cleanup EXIT INT TERM
 
-log "armed by $trigger — waiting ${WAKEUP_DELAY_SECS}s"
+log "armed by $trigger — waiting ${WAKEUP_DELAY_SECS}s (os=$WAKEUP_OS player=$PLAYER_NAME)"
 sleep "$WAKEUP_DELAY_SECS"
 
 idle="$(idle_secs)"
@@ -123,12 +104,12 @@ if [ -z "$video" ] || [ ! -f "$video" ]; then
 fi
 
 if [ "${WAKEUP_DRY_RUN:-0}" = "1" ]; then
-  log "PLAY $video (dry run, trigger=$trigger, idle=${idle}s)"
+  log "PLAY $video (dry run, trigger=$trigger, idle=${idle}s, os=$WAKEUP_OS, player=$PLAYER_NAME)"
   exit 0
 fi
 
 set_volume
-log "PLAY $video (trigger=$trigger, idle=${idle}s)"
+log "PLAY $video (trigger=$trigger, idle=${idle}s, os=$WAKEUP_OS, player=$PLAYER_NAME)"
 
 deadline=$(( SECONDS + WAKEUP_MAX_SECS ))
 while :; do

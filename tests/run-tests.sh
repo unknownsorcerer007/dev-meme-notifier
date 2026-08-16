@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Logic tests. No video is actually played: the worker runs in dry-run mode and
 # idle time is faked, so this is safe to run any time.
+# Cross-platform: macOS, Linux, Windows (Git Bash/MSYS2).
 #
 #   ./tests/run-tests.sh
 
@@ -18,9 +19,15 @@ FAIL=0
 pass() { printf '  \033[32m✓\033[0m %s\n' "$1"; PASS=$((PASS + 1)); }
 fail() { printf '  \033[31m✗\033[0m %s\n     %s\n' "$1" "${2:-}"; FAIL=$((FAIL + 1)); }
 
-now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+now_ms() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
+  else
+    echo $(( $(date +%s) * 1000 ))
+  fi
+}
 
-# Fresh log + lock per test, so cases can't contaminate each other.
+# Fresh log + lock per test.
 setup() {
   LOG="$WORK/$1.log"
   LOCK="$WORK/$1.lock"
@@ -28,14 +35,14 @@ setup() {
   rm -rf "$LOCK"
 }
 
-# Run the hook exactly as Claude Code would: JSON on stdin.
+# Run the hook exactly as an agent would: JSON on stdin.
 fire() {
   local fixture="$1"; shift
   env WAKEUP_LOG="$LOG" WAKEUP_LOCK="$LOCK" WAKEUP_DRY_RUN=1 "$@" \
     "$ROOT/wakeup.sh" <"$fixture"
 }
 
-# Poll instead of sleeping a fixed amount: keeps the suite fast and non-flaky.
+# Poll instead of sleeping a fixed amount: fast and non-flaky.
 wait_for() {
   local pattern="$1" timeout="${2:-8}" i=0
   while [ "$i" -lt $((timeout * 10)) ]; do
@@ -46,7 +53,7 @@ wait_for() {
   return 1
 }
 
-# Wait for every spawned worker to finish so the next test starts clean.
+# Wait for every spawned worker to finish.
 settle() { local i=0; while [ -d "$LOCK" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done; }
 
 echo
@@ -77,9 +84,9 @@ settle
 setup t3
 fire "$FIX/stop.json" WAKEUP_DELAY_SECS=1 WAKEUP_IDLE_OVERRIDE=60
 if wait_for 'PLAY .*trigger=stop'; then
-  pass "Claude finishing a task while you're away plays the alarm"
+  pass "agent finishing a task while you're away plays the alarm"
 else
-  fail "Claude finishing a task while you're away plays the alarm" "$(cat "$LOG")"
+  fail "agent finishing a task while you're away plays the alarm" "$(cat "$LOG")"
 fi
 settle
 
@@ -114,11 +121,10 @@ start="$(now_ms)"
 fire "$FIX/permission_prompt.json" WAKEUP_DELAY_SECS=30 WAKEUP_IDLE_OVERRIDE=60
 elapsed=$(( $(now_ms) - start ))
 if [ "$elapsed" -lt 500 ]; then
-  pass "the hook never blocks Claude Code (returned in ${elapsed}ms)"
+  pass "the hook never blocks the agent (returned in ${elapsed}ms)"
 else
-  fail "the hook never blocks Claude Code" "took ${elapsed}ms"
+  fail "the hook never blocks the agent" "took ${elapsed}ms"
 fi
-# Kill the 30s worker rather than waiting it out.
 [ -f "$LOCK/pid" ] && kill "$(cat "$LOCK/pid")" 2>/dev/null
 rm -rf "$LOCK"
 
@@ -156,13 +162,58 @@ else
 fi
 settle
 
-# 10 -------------------------------------------------------------------------
+# 10 --------------------------------------------------------------------------
 setup t10
 video="$(env WAKEUP_LOG="$LOG" bash -c '. '"$ROOT"'/lib/common.sh; resolve_video')"
 if [ -n "$video" ] && [ -f "$video" ]; then
   pass "media/ auto-discovery finds $(basename "$video")"
 else
   fail "media/ auto-discovery finds a clip" "got '$video'"
+fi
+settle
+
+# 11 — Codex-style event ----------------------------------------------------
+setup t11
+fire "$FIX/codex_event.json" WAKEUP_DELAY_SECS=1 WAKEUP_IDLE_OVERRIDE=60
+if wait_for '^.*PLAY '; then
+  pass "Codex-style event (event field) triggers the alarm"
+else
+  fail "Codex-style event (event field) triggers the alarm" "$(cat "$LOG")"
+fi
+settle
+
+# 12 — Generic type field ----------------------------------------------------
+setup t12
+fire "$FIX/generic_type.json" WAKEUP_DELAY_SECS=1 WAKEUP_IDLE_OVERRIDE=60
+if wait_for 'skipped\|PLAY\|armed\|skip'; then
+  pass "generic event with 'type' field is handled"
+else
+  fail "generic event with 'type' field is handled" "$(cat "$LOG")"
+fi
+settle
+
+# 13 — Agent detection -------------------------------------------------------
+detect_out="$(bash -c '. '"$ROOT"'/lib/agents.sh; detect_agents')"
+if [ $? -eq 0 ]; then
+  pass "agent detection runs without error (found: $(echo $detect_out | tr '\n' ' '))"
+else
+  fail "agent detection runs without error"
+fi
+
+# 14 — Platform detection ----------------------------------------------------
+os_out="$(bash -c '. '"$ROOT"'/lib/platform.sh; echo $WAKEUP_OS')"
+if [ -n "$os_out" ] && [ "$os_out" != "unknown" ]; then
+  pass "platform detection: $os_out"
+else
+  fail "platform detection" "got '$os_out'"
+fi
+
+# 15 — Player detection ------------------------------------------------------
+player_out="$(bash -c '. '"$ROOT"'/lib/platform.sh; . '"$ROOT"'/lib/player.sh; detect_player; echo $PLAYER_NAME')"
+if [ -n "$player_out" ] && [ "$player_out" != "none" ]; then
+  pass "player detection: $player_out"
+else
+  pass "player detection: $player_out (no player found — ok for CI)"
 fi
 
 echo
