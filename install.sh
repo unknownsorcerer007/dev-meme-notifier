@@ -36,6 +36,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# Create config.env from example if it doesn't exist
+if [ ! -f "$SCRIPT_DIR/config.env" ] && [ -f "$SCRIPT_DIR/config.env.example" ]; then
+  cp "$SCRIPT_DIR/config.env.example" "$SCRIPT_DIR/config.env"
+  echo "created config.env from config.env.example"
+fi
+
 # Source shared modules
 . "$SCRIPT_DIR/lib/common.sh"
 . "$SCRIPT_DIR/lib/deps.sh"

@@ -155,6 +155,6 @@ _qt_running() {
 }
 
 _qt_stop() {
-  osascript -e 'tell application "QuickTime Player" to if (count documents) > 0 then close front document saving no' \
-            -e 'tell application "QuickTime Player" to quit' >/dev/null 2>&1
+  # Only close the frontmost document, don't quit the app — user may have other windows open
+  osascript -e 'tell application "QuickTime Player" to if (count documents) > 0 then close front document saving no' >/dev/null 2>&1
 }
