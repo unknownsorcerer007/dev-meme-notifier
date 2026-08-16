@@ -39,9 +39,37 @@ log() {
   return 0
 }
 
+# Supported video extensions. Only these are valid alarm media.
+WAKEUP_VIDEO_EXTENSIONS="mp4 mov avi mkv webm"
+
+# Check if a file has a valid video extension.
+is_video_file() {
+  local file="$1"
+  local ext="${file##*.}"
+  ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+  case "$ext" in
+    mp4|mov|avi|mkv|webm) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Warn about non-video files sitting in media/ (gif, png, jpg, etc.).
+warn_non_video_files() {
+  local f
+  for f in "$WAKEUP_HOME"/media/*; do
+    [ -f "$f" ] || continue
+    is_video_file "$f" || log "WARN ignoring non-video file: $(basename "$f") — only video formats are supported (mp4/mov/avi/mkv/webm)"
+  done
+}
+
 # Resolve the video to play: explicit path, or random from media/.
+# VIDEO ONLY — no gifs, no images, no exceptions.
 resolve_video() {
   if [ -n "$WAKEUP_VIDEO" ]; then
+    if ! is_video_file "$WAKEUP_VIDEO"; then
+      log "ERROR WAKEUP_VIDEO is not a video file: $WAKEUP_VIDEO"
+      return 1
+    fi
     printf '%s\n' "$WAKEUP_VIDEO"
     return 0
   fi

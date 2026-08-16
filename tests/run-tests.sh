@@ -215,6 +215,48 @@ if [ -n "$player_out" ] && [ "$player_out" != "none" ]; then
 else
   pass "player detection: $player_out (no player found — ok for CI)"
 fi
+settle
+
+# 16 — Video-only enforcement -------------------------------------------------
+setup t16
+# Create fake non-video files in a temp media dir
+mkdir -p "$WORK/media"
+: >"$WORK/media/meme.gif"
+: >"$WORK/media/meme.png"
+: >"$WORK/media/meme.jpg"
+touch -t 202001010000 "$WORK/media/meme.gif" "$WORK/media/meme.png" "$WORK/media/meme.jpg"
+video_out="$(env WAKEUP_LOG="$LOG" WAKEUP_HOME="$ROOT" bash -c '
+  . '"$ROOT"'/lib/platform.sh
+  . '"$ROOT"'/lib/player.sh
+  . '"$ROOT"'/lib/agents.sh
+  WAKEUP_HOME="'"$WORK"'" . '"$ROOT"'/lib/common.sh
+  resolve_video
+' 2>/dev/null)"
+if [ -z "$video_out" ] || bash -c ". $ROOT/lib/common.sh; is_video_file '$video_out'"; then
+  pass "non-video files (gif/png/jpg) in media/ are ignored"
+else
+  fail "non-video files (gif/png/jpg) in media/ are ignored" "got '$video_out'"
+fi
+settle
+
+# 17 — is_video_file validation -----------------------------------------------
+if bash -c '. '"$ROOT"'/lib/platform.sh; . '"$ROOT"'/lib/player.sh; . '"$ROOT"'/lib/agents.sh; . '"$ROOT"'/lib/common.sh; is_video_file "foo.mp4" && is_video_file "bar.MOV" && ! is_video_file "no.gif" && ! is_video_file "no.png" && ! is_video_file "no.jpg" && ! is_video_file "no.webp"'; then
+  pass "is_video_file correctly accepts video and rejects images/gifs"
+else
+  fail "is_video_file correctly accepts video and rejects images/gifs"
+fi
+settle
+
+# 18 — WAKEUP_VIDEO rejects non-video ----------------------------------------
+setup t18
+fire "$FIX/permission_prompt.json" WAKEUP_DELAY_SECS=1 WAKEUP_IDLE_OVERRIDE=60 \
+     WAKEUP_VIDEO="$WORK/media/meme.gif"
+if wait_for 'ERROR WAKEUP_VIDEO is not a video file' && ! grep -q 'PLAY ' "$LOG"; then
+  pass "WAKEUP_VIDEO set to a .gif is rejected with error"
+else
+  fail "WAKEUP_VIDEO set to a .gif is rejected with error" "$(cat "$LOG")"
+fi
+settle
 
 echo
 if [ "$FAIL" -eq 0 ]; then

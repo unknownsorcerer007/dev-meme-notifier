@@ -76,6 +76,9 @@ Everything lives in [`config.env`](config.env). Edit it, save, restart your agen
 Drop any `.mp4`, `.mov`, `.avi`, `.mkv`, or `.webm` into `media/`. With more than one in
 there, each alarm picks one at random.
 
+**⚠️ Video only.** GIFs, images (png/jpg/webp), and other non-video files are ignored.
+The alarm plays fullscreen video with sound — that's what gets your attention.
+
 ## Supported Agents
 
 | Agent | Config Location | Hook Format |

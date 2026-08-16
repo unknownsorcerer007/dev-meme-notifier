@@ -88,6 +88,9 @@ cleanup() {
 acquire_lock || { log "skip $trigger (another alarm holds the lock)"; exit 0; }
 trap cleanup EXIT INT TERM
 
+# Warn once about any non-video files in media/.
+warn_non_video_files
+
 log "armed by $trigger — waiting ${WAKEUP_DELAY_SECS}s (os=$WAKEUP_OS player=$PLAYER_NAME)"
 sleep "$WAKEUP_DELAY_SECS"
 
