@@ -1,4 +1,4 @@
-# claude-code-wakeup-alarm
+# dev-meme-notifier
 
 You give your coding agent a long task. You pick up your phone. Twenty minutes later you look
 back at your laptop and it's been sitting on a permission prompt for nineteen of them.
@@ -6,7 +6,7 @@ back at your laptop and it's been sitting on a permission prompt for nineteen of
 This fixes that. When your agent needs you, it plays a video at you — fullscreen, with
 sound — and stops the moment you touch the keyboard.
 
-**Works with:** Claude Code, OpenAI Codex, Hermes, Goose, Aider — any agent that supports hooks.
+**Works with:** Claude Code, OpenAI Codex, Hermes, Goose, Aider — any agent that supports hooks or MCP.
 
 **Works on:** macOS, Linux (X11/Wayland), Windows (Git Bash/MSYS2/WSL).
 
@@ -18,9 +18,11 @@ Agent needs permission  →  wait 10s  →  still not back?  →  🔊 VIDEO
 ## Install
 
 ```bash
-git clone https://github.com/rafcopy/claude-code-wakeup-alarm.git
-cd claude-code-wakeup-alarm
-./install.sh          # auto-detects agents, installs deps
+git clone https://github.com/unknownsorcerer007/dev-meme-notifier.git
+cd dev-meme-notifier
+./install.sh              # auto-detects agents, installs deps
+./install.sh --mcp        # also set up MCP server
+./install.sh --project --mcp  # both
 ```
 
 Options:
@@ -28,6 +30,7 @@ Options:
 ./install.sh --project              # this repo only
 ./install.sh --agent claude         # specific agent only
 ./install.sh --agent claude --agent codex  # multiple agents
+./install.sh --mcp                  # install MCP server (Node.js >= 18)
 ```
 
 The installer:
@@ -79,15 +82,53 @@ there, each alarm picks one at random.
 **⚠️ Video only.** GIFs, images (png/jpg/webp), and other non-video files are ignored.
 The alarm plays fullscreen video with sound — that's what gets your attention.
 
+## MCP Server (Universal Agent Support)
+
+The MCP server lets **any** agent trigger alarms, list media, and manage configuration
+via the Model Context Protocol — not just agents with hook support.
+
+### Setup
+
+```bash
+./install.sh --mcp     # installs Node.js dependencies
+
+# Add to your agent's MCP config:
+{
+  "dev-meme-notifier": {
+    "command": "node",
+    "args": ["./mcp-server/server.js"]
+  }
+}
+```
+
+### Available Tools
+
+| Tool | Description |
+|---|---|
+| `trigger_alarm` | Trigger a fullscreen video popup (any event type) |
+| `trigger_alarm_dry` | Test what would happen without playing video |
+| `list_media` | List available video files |
+| `get_status` | Show current config, platform, player, media count |
+| `set_config` | Update any config.env setting |
+| `add_media` | Add a local video file to the media library |
+
+### SSE Mode (Remote Agents)
+
+```bash
+node mcp-server/server.js --port 3000
+# MCP endpoint: http://localhost:3000/sse
+```
+
 ## Supported Agents
 
-| Agent | Config Location | Hook Format |
+| Agent | Integration | Config Location |
 |---|---|---|
-| Claude Code | `~/.claude/settings.json` | JSON hooks (Notification, Stop) |
-| OpenAI Codex | `~/.codex/config.toml` | TOML hooks |
-| Hermes | `~/.hermes/config.toml` | TOML hooks |
-| Goose | `~/.goose/config.yaml` | YAML hooks |
-| Aider | `~/.aider.conf.yml` | YAML hooks |
+| Claude Code | Hook + MCP | `~/.claude/settings.json` |
+| OpenAI Codex | Hook + MCP | `~/.codex/config.toml` |
+| Hermes | Hook + MCP | `~/.hermes/config.toml` |
+| Goose | Hook + MCP | `~/.goose/config.yaml` |
+| Aider | Hook + MCP | `~/.aider.conf.yml` |
+| Any MCP agent | MCP only | N/A |
 
 ## Supported Platforms
 
@@ -117,6 +158,9 @@ kill the player the instant you're back.
 
 `lib/deps.sh` auto-installs system dependencies via the detected package manager.
 
+`mcp-server/server.js` exposes the whole system as an MCP server with 6 tools, usable
+by any agent that speaks the Model Context Protocol.
+
 ## Tests
 
 ```bash
@@ -137,3 +181,6 @@ to do this automatically.
 
 **Linux idle detection not working.** Install `xprintidle` (for X11). The installer
 tries this automatically. On Wayland, detection uses `/proc` input events as a fallback.
+
+**MCP server not connecting.** Ensure Node.js >= 18 is installed. Run
+`cd mcp-server && npm install` to install dependencies manually.

@@ -16,17 +16,20 @@ HOOK="$SCRIPT_DIR/wakeup.sh"
 # Parse args
 SCOPE="global"
 TARGET_AGENTS=()
+INSTALL_MCP=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --project)  SCOPE="project"; shift ;;
     --agent)    TARGET_AGENTS+=("$2"); shift 2 ;;
+    --mcp)      INSTALL_MCP=true; shift ;;
     --help|-h)
-      echo "Usage: $0 [--project] [--agent NAME ...]"
+      echo "Usage: $0 [--project] [--agent NAME ...] [--mcp]"
       echo
       echo "  --project     Install hooks for this project only"
       echo "  --agent NAME  Install for a specific agent (claude, codex, hermes, goose, aider)"
       echo "                Can be repeated. Without --agent, installs for all detected agents."
+      echo "  --mcp         Also install MCP server dependencies (Node.js >= 18 required)"
       exit 0
       ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
@@ -78,6 +81,54 @@ for agent in "${TARGET_AGENTS[@]}"; do
     HOOKS_INSTALLED=$((HOOKS_INSTALLED + 1))
   fi
 done
+
+# --- MCP Server Setup ---
+if [ "$INSTALL_MCP" = true ]; then
+  echo
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "  MCP Server Setup"
+  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "⚠️  Node.js not found — MCP server requires Node.js >= 18"
+    echo "   Install: https://nodejs.org/"
+    echo "   Skipping MCP setup."
+  else
+    NODE_VER="$(node -v | sed 's/v//' | cut -d. -f1)"
+    if [ "$NODE_VER" -lt 18 ]; then
+      echo "⚠️  Node.js $NODE_VER found, but MCP requires >= 18"
+      echo "   Update: https://nodejs.org/"
+      echo "   Skipping MCP setup."
+    else
+      echo "📦 Installing MCP server dependencies..."
+      cd "$SCRIPT_DIR/mcp-server"
+      if command -v npm >/dev/null 2>&1; then
+        npm install --production 2>&1 | tail -3
+      elif command -v pnpm >/dev/null 2>&1; then
+        pnpm install --prod 2>&1 | tail -3
+      else
+        echo "⚠️  Neither npm nor pnpm found. Install dependencies manually:"
+        echo "   cd $SCRIPT_DIR/mcp-server && npm install"
+      fi
+      echo
+      echo "✅ MCP server ready!"
+      echo
+      echo "To use with your agent, add to your MCP config:"
+      echo
+      echo '  "dev-meme-notifier": {'
+      echo '    "command": "node",'
+      echo "    \"args\": [\"$SCRIPT_DIR/mcp-server/server.js\"]"
+      echo '  }'
+      echo
+      echo "Or run directly:"
+      echo "  node $SCRIPT_DIR/mcp-server/server.js"
+      echo
+      echo "For remote agents (SSE mode):"
+      echo "  node $SCRIPT_DIR/mcp-server/server.js --port 3000"
+      cd "$SCRIPT_DIR"
+    fi
+  fi
+fi
 
 echo
 echo "╔══════════════════════════════════════════════╗"
