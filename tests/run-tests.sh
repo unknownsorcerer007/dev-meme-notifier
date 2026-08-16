@@ -217,7 +217,7 @@ else
 fi
 settle
 
-# 16 — Video format validation ------------------------------------------------
+# 16 — Video-only enforcement -------------------------------------------------
 setup t16
 # Create fake non-video files in a temp media dir
 mkdir -p "$WORK/media"

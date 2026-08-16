@@ -63,7 +63,7 @@ warn_non_video_files() {
 }
 
 # Resolve the video to play: explicit path, or random from media/.
-# Plays a video at you when your agent needs your attention.
+# VIDEO ONLY — no gifs, no images, no exceptions.
 resolve_video() {
   if [ -n "$WAKEUP_VIDEO" ]; then
     if ! is_video_file "$WAKEUP_VIDEO"; then
