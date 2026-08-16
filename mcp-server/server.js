@@ -277,7 +277,7 @@ server.tool(
             "🎬 Media:",
             `  Video files available: ${mediaCount}`,
             `  Location: ${MEDIA_DIR}`,
-            "  Format: video only (mp4/mov/avi/mkv/webm)",
+            "  Plays a video at you when your agent needs your attention",
             "",
             "🔒 Lock state:",
             `  ${lockStatus}`,
