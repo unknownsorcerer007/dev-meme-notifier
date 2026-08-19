@@ -29,7 +29,7 @@ done
 . "$SCRIPT_DIR/lib/common.sh"
 
 echo
-echo "uninstalling claude-code-wakeup-alarm hooks..."
+echo "uninstalling dev-meme-notifier hooks..."
 echo
 
 # If no specific agents given, detect all

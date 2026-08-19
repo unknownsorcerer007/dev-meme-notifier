@@ -243,7 +243,7 @@ _install_codex() {
   # Codex supports post_tool_call hooks
   cat >>"$config" <<EOF
 
-# claude-code-wakeup-alarm hook
+# dev-meme-notifier hook
 [hooks]
 on_notification = "$hook_cmd"
 on_idle = "$hook_cmd"
@@ -258,7 +258,7 @@ _uninstall_codex() {
   [ -f "$config" ] || { echo "  nothing to do"; return 0; }
 
   cp "$config" "$config.bak.$(date +%s)"
-  grep -v 'wakeup\.sh' "$config" | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
+  grep -v 'wakeup\.sh' "$config" | grep -v 'dev-meme-notifier' | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
   mv "$config.tmp" "$config"
   echo "  ✓ Codex → $config"
 }
@@ -280,7 +280,7 @@ _install_hermes() {
 
   cat >>"$config" <<EOF
 
-# claude-code-wakeup-alarm hook
+# dev-meme-notifier hook
 [hooks]
 on_notification = "$hook_cmd"
 on_idle = "$hook_cmd"
@@ -295,7 +295,7 @@ _uninstall_hermes() {
   [ -f "$config" ] || { echo "  nothing to do"; return 0; }
 
   cp "$config" "$config.bak.$(date +%s)"
-  grep -v 'wakeup\.sh' "$config" | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
+  grep -v 'wakeup\.sh' "$config" | grep -v 'dev-meme-notifier' | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
   mv "$config.tmp" "$config"
   echo "  ✓ Hermes → $config"
 }
@@ -317,7 +317,7 @@ _install_goose() {
 
   cat >>"$config" <<EOF
 
-# claude-code-wakeup-alarm hook
+# dev-meme-notifier hook
 hooks:
   on_notification: "$hook_cmd"
   on_idle: "$hook_cmd"
@@ -332,7 +332,7 @@ _uninstall_goose() {
   [ -f "$config" ] || { echo "  nothing to do"; return 0; }
 
   cp "$config" "$config.bak.$(date +%s)"
-  grep -v 'wakeup\.sh' "$config" | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
+  grep -v 'wakeup\.sh' "$config" | grep -v 'dev-meme-notifier' | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
   mv "$config.tmp" "$config"
   echo "  ✓ Goose → $config"
 }
@@ -354,7 +354,7 @@ _install_aider() {
 
   cat >>"$config" <<EOF
 
-# claude-code-wakeup-alarm hook
+# dev-meme-notifier hook
 hooks:
   on_notification: "$hook_cmd"
   on_idle: "$hook_cmd"
@@ -369,7 +369,7 @@ _uninstall_aider() {
   [ -f "$config" ] || { echo "  nothing to do"; return 0; }
 
   cp "$config" "$config.bak.$(date +%s)"
-  grep -v 'wakeup\.sh' "$config" | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
+  grep -v 'wakeup\.sh' "$config" | grep -v 'dev-meme-notifier' | grep -v 'claude-code-wakeup-alarm' > "$config.tmp" 2>/dev/null || true
   mv "$config.tmp" "$config"
   echo "  ✓ Aider → $config"
 }

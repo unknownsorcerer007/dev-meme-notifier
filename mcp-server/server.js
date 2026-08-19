@@ -15,7 +15,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { z } from "zod";
 import { execSync, spawn } from "child_process";
-import { readdir, stat, access, copyFileSync, existsSync } from "fs/promises";
+import { readdir, stat, access } from "fs/promises";
+import { copyFileSync, existsSync } from "fs";
 import { join, resolve, dirname, extname } from "path";
 import { fileURLToPath } from "url";
 import { createServer } from "http";
@@ -161,9 +162,17 @@ server.tool(
       .describe("The event type to simulate"),
   },
   async ({ event }) => {
+    const payload = JSON.stringify({
+      session_id: `mcp-dry-${Date.now()}`,
+      cwd: process.cwd(),
+      hook_event_name: event === "stop" ? "Stop" : "Notification",
+      notification_type: event === "stop" ? undefined : event,
+      message: `Dry run: ${event}`,
+      ...(event === "stop" ? { stop_hook_active: false } : {}),
+    });
+
     const result = runScript(WAKEUP_SCRIPT, [], {
       WAKEUP_DRY_RUN: "1",
-      WAKEUP_LOG: "/dev/null",
     });
 
     return {

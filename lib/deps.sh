@@ -141,7 +141,7 @@ _install_ffmpeg() {
 }
 
 _install_xprintidle() {
-  # Only needed on Linux with X11
+  # Only needed on Linux with X11 (or XWayland)
   if [ "$WAKEUP_OS" != "linux" ]; then
     return
   fi
@@ -151,8 +151,9 @@ _install_xprintidle() {
     return
   fi
 
-  # Check if we're on X11
+  # Check if we have an X11 display (including XWayland on Wayland)
   if [ -z "${DISPLAY:-}" ]; then
+    echo "  ⚠ no X11 display — skipping xprintidle (Wayland idle uses fallback)"
     return
   fi
 

@@ -97,30 +97,73 @@ _idle_linux() {
   _idle_proc_input
 }
 
-# Wayland idle: best-effort via /proc input events.
+# Wayland idle: try XWayland xprintidle, then loginctl, then /dev/input atime.
 _idle_wayland() {
+  # If XWayland is running, xprintidle works on Wayland too
+  if [ -n "${DISPLAY:-}" ] && command -v xprintidle >/dev/null 2>&1; then
+    local ms
+    ms="$(xprintidle 2>/dev/null)"
+    case "$ms" in
+      ''|*[!0-9]*) ;;
+      *) echo $(( ms / 1000 )); return ;;
+    esac
+  fi
+
+  # Try loginctl (systemd-based systems with GNOME/KDE idle tracking)
+  if command -v loginctl >/dev/null 2>&1; then
+    local session_id
+    session_id="$(loginctl show-user "${USER:-root}" -p Display 2>/dev/null | cut -d= -f2)"
+    if [ -z "$session_id" ]; then
+      session_id="$(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1; exit}')"
+    fi
+    if [ -n "$session_id" ]; then
+      local idle_hint
+      idle_hint="$(loginctl show-session "$session_id" -p IdleHint 2>/dev/null)"
+      if [ "$idle_hint" = "IdleHint=yes" ]; then
+        local idle_usec
+        idle_usec="$(loginctl show-session "$session_id" -p IdleSinceHint 2>/dev/null | cut -d= -f2)"
+        if [ -n "$idle_usec" ] && [ "$idle_usec" -gt 0 ] 2>/dev/null; then
+          local now_usec
+          now_usec="$(date +%s%N | cut -c1-16)"
+          echo $(( (now_usec - idle_usec) / 1000000 ))
+          return
+        fi
+        echo 300
+        return
+      fi
+      echo 0
+      return
+    fi
+  fi
+
+  # Fallback: check /dev/input device file access times
   _idle_proc_input
 }
 
-# Parse /proc/bus/input/devices for last event time — rough fallback.
+# Fallback idle detection via /dev/input device access times.
+# Works when atime is enabled on the filesystem.
 _idle_proc_input() {
+  local latest=0
+  local devpath
+  for devpath in /dev/input/event*; do
+    [ -e "$devpath" ] || continue
+    local atime
+    atime="$(stat -c %X "$devpath" 2>/dev/null)"
+    [ -n "$atime" ] && [ "$atime" -gt "$latest" ] 2>/dev/null && latest="$atime"
+  done
+
+  if [ "$latest" -gt 0 ] 2>/dev/null; then
+    local now
+    now="$(date +%s)"
+    local idle=$(( now - latest ))
+    [ "$idle" -lt 0 ] && idle=0
+    echo "$idle"
+    return
+  fi
+
+  # Last resort: system uptime (always "idle" — better than crashing)
   if [ -r /proc/uptime ]; then
-    local uptime
-    uptime="$(awk '{printf "%d", $1}' /proc/uptime)"
-    # Find the most recent event across all input devices
-    local latest=0
-    local dev
-    for dev in /sys/class/input/event*/device/name; do
-      [ -r "$dev" ] || continue
-      local evdev="/dev/input/$(basename "$(dirname "$dev")")"
-      [ -e "$evdev" ] || continue
-    done
-    # Use /proc/bus/input/devices if available
-    if [ -r /proc/bus/input/devices ]; then
-      # This is a rough heuristic — most reliable is xprintidle on X11
-      :
-    fi
-    echo "${uptime:-999}"
+    awk '{printf "%d", $1}' /proc/uptime
     return
   fi
   echo 999

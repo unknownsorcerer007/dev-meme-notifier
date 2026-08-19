@@ -48,7 +48,7 @@ fi
 
 echo
 echo "╔══════════════════════════════════════════════╗"
-echo "║    claude-code-wakeup-alarm — installer      ║"
+echo "║       dev-meme-notifier — installer          ║"
 echo "╚══════════════════════════════════════════════╝"
 echo
 print_env_summary
