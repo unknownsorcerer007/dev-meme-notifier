@@ -1,5 +1,12 @@
 .DS_Store
+Thumbs.db
 *.log
 *.bak.*
 .claude/
 config.env
+.vscode/
+.idea/
+
+# mcp-server (Node.js)
+mcp-server/node_modules/
+mcp-server/npm-debug.log*
